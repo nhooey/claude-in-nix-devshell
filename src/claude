@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# PATH-shim wrapper that routes `claude` through the current project's
+# Nix devShell when one is available, and through the real `claude` binary
+# otherwise. See the README for design notes.
+
+set -eu
+
+# 1. Locate the real claude binary, avoiding self-recursion.
+self_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+clean_path=$(echo "$PATH" | tr ':' '\n' | grep -vxF "$self_dir" | paste -sd: -)
+real_claude=$(PATH="$clean_path" command -v claude) || {
+  echo "claude-in-nix-devshell: real claude binary not found on PATH (excluding $self_dir)" >&2
+  echo "  install Claude Code first (npm, Homebrew, official installer, …) and ensure" >&2
+  echo "  it appears on PATH after $self_dir." >&2
+  exit 127
+}
+
+# 2. Escape hatch.
+if [ "${CLAUDE_NIX_BYPASS:-}" = "1" ]; then
+  exec "$real_claude" "$@"
+fi
+
+# 3. Anchor to the git toplevel; outside any repo, pass through.
+root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [ -z "$root" ]; then
+  exec "$real_claude" "$@"
+fi
+cd "$root"
+
+# 4. Honor user-supplied session flags; otherwise allocate.
+session_id=""
+inject_session=true
+prev=""
+for arg in "$@"; do
+  case "$prev" in
+  --resume) session_id="$arg" ;;
+  esac
+  case "$arg" in
+  --continue | -c)
+    inject_session=false
+    break
+    ;;
+  --resume)
+    inject_session=false
+    ;;
+  esac
+  prev="$arg"
+done
+if $inject_session; then
+  session_id=$(uuidgen | tr 'A-Z' 'a-z')
+  set -- --session-id "$session_id" "$@"
+fi
+
+state_dir="${XDG_RUNTIME_DIR:-/tmp}"
+export CLAUDE_NIX_SESSION_ID="${session_id:-unknown}"
+export CLAUDE_NIX_FLAG="$state_dir/claude-in-nix-devshell-restart-$CLAUDE_NIX_SESSION_ID"
+export CLAUDE_NIX_BASELINE="$state_dir/claude-in-nix-devshell-baseline-$CLAUDE_NIX_SESSION_ID"
+trap 'rm -f "$CLAUDE_NIX_FLAG" "$CLAUDE_NIX_BASELINE"' EXIT
+
+# 5. Restart loop.
+rc=0
+while :; do
+  if [ -e "$root/flake.nix" ] && nix develop --command true >/dev/null 2>&1; then
+    nix develop --command "$real_claude" "$@" || rc=$?
+  else
+    "$real_claude" "$@" || rc=$?
+  fi
+  if [ -e "$CLAUDE_NIX_FLAG" ]; then
+    rm -f "$CLAUDE_NIX_FLAG" "$CLAUDE_NIX_BASELINE"
+    set -- --resume "$CLAUDE_NIX_SESSION_ID"
+    continue
+  fi
+  exit "$rc"
+done

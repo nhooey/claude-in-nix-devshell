@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.nix-profile/libexec/claude-in-nix-devshell/prompt-hook"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook for claude-in-nix-devshell. Detects drift in the
+# project's flake.nix / flake.lock since the session started, prints a
+# red-background warning to stderr, and injects an equivalent system
+# reminder into Claude's context via stdout JSON.
+
+set -eu
+
+[ -n "${CLAUDE_NIX_SESSION_ID:-}" ] || exit 0 # not under the wrapper
+
+root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+[ -n "$root" ] || root=$(pwd)
+[ -e "$root/flake.nix" ] || exit 0
+
+# Current state.
+head_current=""
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  head_current=$(git -C "$root" rev-parse HEAD 2>/dev/null || true)
+fi
+content_current=$(cat "$root/flake.nix" "$root/flake.lock" 2>/dev/null |
+  sha256sum | cut -d' ' -f1)
+
+# First prompt of the session: record baseline and exit silently.
+if [ ! -e "$CLAUDE_NIX_BASELINE" ]; then
+  {
+    printf 'head=%s\n' "$head_current"
+    printf 'content=%s\n' "$content_current"
+  } >"$CLAUDE_NIX_BASELINE"
+  exit 0
+fi
+
+head_baseline=$(grep '^head=' "$CLAUDE_NIX_BASELINE" | cut -d= -f2-)
+content_baseline=$(grep '^content=' "$CLAUDE_NIX_BASELINE" | cut -d= -f2-)
+
+if [ "$head_current" = "$head_baseline" ] &&
+  [ "$content_current" = "$content_baseline" ]; then
+  exit 0 # no drift
+fi
+
+# Drift. Set the flag.
+touch "$CLAUDE_NIX_FLAG"
+
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+  esc=$'\033'
+  red="${esc}[41;1;97m"
+  dim="${esc}[2m"
+  reset="${esc}[0m"
+else
+  red=""
+  dim=""
+  reset=""
+fi
+
+short() { printf '%s' "${1:0:7}"; }
+head_moved=false
+if [ -n "$head_current" ] && [ "$head_current" != "$head_baseline" ]; then
+  head_moved=true
+fi
+
+{
+  printf '%s\n' "$red"
+  if [ -n "$red" ]; then
+    printf '  ⚠  devShell drift detected\n\n'
+  else
+    printf '  !!! devShell drift detected !!!\n\n'
+  fi
+  printf '  flake.nix / flake.lock changed since this Claude Code session started.\n'
+  printf '  The session is still running in the OLD devShell.\n\n'
+  if [ -n "$head_baseline" ]; then
+    printf '      HEAD at start:    %s\n' "$(short "$head_baseline")"
+  fi
+  if $head_moved; then
+    printf '      HEAD now:         %s\n' "$(short "$head_current")"
+  fi
+  printf '      content at start: %s\n' "$(short "$content_baseline")"
+  printf '      content now:      %s\n\n' "$(short "$content_current")"
+  printf '  When you type  /exit  this wrapper will:\n'
+  printf '    1. See the session-scoped restart flag at %s\n' "$CLAUDE_NIX_FLAG"
+  printf '    2. Clean up the session tmp files.\n'
+  printf '    3. Re-evaluate the new devShell via `nix develop --command true`.\n'
+  printf '    4. Relaunch `claude --resume %s` inside the new devShell.\n' \
+    "$CLAUDE_NIX_SESSION_ID"
+  printf '    5. Your conversation transcript is preserved — no messages are lost.\n\n'
+  printf '  Type  /exit  when ready. To skip the wrapper entirely on the next launch,\n'
+  printf '  set  CLAUDE_NIX_BYPASS=1  in the environment.\n'
+  printf '%s\n\n' "$reset"
+
+  printf '%s' "$dim"
+  printf '  full hashes:\n'
+  if [ -n "$head_baseline" ]; then
+    printf '    HEAD at start:    %s\n' "$head_baseline"
+  fi
+  if $head_moved; then
+    printf '    HEAD now:         %s\n' "$head_current"
+  fi
+  printf '    content at start: %s\n' "$content_baseline"
+  printf '    content now:      %s\n' "$content_current"
+  printf '%s\n' "$reset"
+} >&2
+
+# Inject equivalent text as a system reminder via stdout JSON so Claude relays it.
+head_clause=""
+if $head_moved; then
+  head_clause=" HEAD $(short "$head_baseline")->$(short "$head_current")"
+fi
+cat <<EOF
+{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"devShell drift detected. content_at_start=$(short "$content_baseline") content_now=$(short "$content_current")${head_clause}. When the user types /exit, the wrapper will: (1) see the restart flag, (2) clean up tmp files, (3) re-evaluate the new devShell via nix develop --command true, (4) relaunch claude --resume $CLAUDE_NIX_SESSION_ID inside the new devShell, (5) preserve the conversation transcript. Tell the user this clearly once, then continue with their prompt."}}
+EOF
