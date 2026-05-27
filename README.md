@@ -1,5 +1,7 @@
 # claude-in-nix-devshell
 
+[![Built with Garnix](https://img.shields.io/endpoint?url=https://garnix.io/api/badges/nhooey/claude-in-nix-devshell)](https://garnix.io)
+
 A Nix-packaged wrapper that routes every invocation of the
 [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI through the
 current project's `nix develop` shell. Adds a `UserPromptSubmit` hook that
