@@ -73,8 +73,11 @@ devShell on launch, but won't notice mid-session drift.
 
 ## Escape hatches
 
-- `CLAUDE_NIX_BYPASS=1 claude …` — skip the devShell logic entirely and
-  exec the real `claude` with the original args.
+- `CLAUDE_NIX_DISABLE=1 claude …` — skip the devShell logic entirely
+  and exec the real `claude` with the original args.
+- `CLAUDE_NIX_EXECUTABLE=/path/to/claude claude …` — invoke this
+  executable instead of searching `$PATH`. Useful for testing the shim
+  against a stub.
 - Run from a directory that isn't inside any git work tree — the shim
   passes through.
 - Remove the project's `flake.nix`, or make `nix develop --command true`
@@ -82,16 +85,13 @@ devShell on launch, but won't notice mid-session drift.
 
 ## Detection model
 
-The hook captures two independent signals on the first prompt of a session:
-
-- **HEAD SHA** (`git rev-parse HEAD`), when inside a git work tree.
-- **Content hash** — `sha256sum` of `flake.nix` and `flake.lock`
-  concatenated.
-
-On every subsequent prompt it re-computes both and compares against the
-baseline. Either signal changing counts as drift. HEAD movement indicates a
-commit-level change (pull, checkout, new local commit); content change
-without HEAD movement indicates uncommitted edits.
+On the first prompt of a session the hook records a **content hash** —
+`sha256sum` of `flake.nix` and `flake.lock` concatenated. On every
+subsequent prompt it re-computes the hash and compares against the
+baseline; any change counts as drift, regardless of whether it came from a
+pull, a checkout, a new commit, or an uncommitted edit. HEAD movement on
+its own does not trigger drift — if the flake files are byte-identical
+across the checkout, the resulting devShell is identical too.
 
 Upstream input drift (a tracked branch moving forward, the `nixpkgs` channel
 advancing) is **not** detected — that would require network calls on the

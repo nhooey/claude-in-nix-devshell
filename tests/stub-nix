@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test stub: minimal mock of `nix` covering only `nix develop --command CMD ARGS...`.
+# Sets IN_NIX_SHELL so the shim's caller can verify the devshell branch fired.
+if [ "${1:-}" = "develop" ] && [ "${2:-}" = "--command" ]; then
+  shift 2
+  export IN_NIX_SHELL=impure
+  exec "$@"
+fi
+echo "stub-nix: unsupported invocation: $*" >&2
+exit 99
