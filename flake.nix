@@ -46,6 +46,28 @@
             program = "${pkgs.callPackage ./package.nix { }}/bin/claude";
           };
 
+          checks.integration =
+            pkgs.runCommand "integration-test"
+              {
+                nativeBuildInputs = with pkgs; [
+                  bash
+                  coreutils
+                  gawk
+                  git
+                  gnugrep
+                  util-linux
+                ];
+              }
+              ''
+                cp -r ${./src} src
+                cp -r ${./tests} tests
+                chmod -R u+w src tests
+                patchShebangs src tests
+                export HOME=$TMPDIR
+                bash tests/integration.sh ./src/claude
+                touch $out
+              '';
+
           treefmt = {
             projectRootFile = "flake.nix";
             programs = {
@@ -55,6 +77,9 @@
             settings.formatter.shfmt.includes = [
               "src/claude"
               "src/prompt-hook"
+              "tests/integration.sh"
+              "tests/stub-claude"
+              "tests/stub-nix"
             ];
           };
 
@@ -69,7 +94,7 @@
               {
                 category = "dev";
                 name = "check";
-                help = "Run flake checks (treefmt + build)";
+                help = "Run flake checks (treefmt + build + integration)";
                 command = "nix flake check";
               }
               {
@@ -77,6 +102,12 @@
                 name = "fmt";
                 help = "Format source with treefmt";
                 command = "nix fmt";
+              }
+              {
+                category = "dev";
+                name = "tests";
+                help = "Run integration tests against ./src/claude";
+                command = "bash tests/integration.sh ./src/claude";
               }
             ];
           };

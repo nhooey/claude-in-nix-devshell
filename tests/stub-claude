@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test stub: records what the shim handed off to it.
+log=${STUB_CLAUDE_LOG:-/dev/null}
+{
+  echo "argv: $*"
+  echo "IN_NIX_SHELL=${IN_NIX_SHELL:-<unset>}"
+} >>"$log"

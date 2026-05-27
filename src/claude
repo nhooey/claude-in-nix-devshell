@@ -5,18 +5,26 @@
 
 set -eu
 
-# 1. Locate the real claude binary, avoiding self-recursion.
-self_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
-clean_path=$(echo "$PATH" | tr ':' '\n' | grep -vxF "$self_dir" | paste -sd: -)
-real_claude=$(PATH="$clean_path" command -v claude) || {
-  echo "claude-in-nix-devshell: real claude binary not found on PATH (excluding $self_dir)" >&2
-  echo "  install Claude Code first (npm, Homebrew, official installer, …) and ensure" >&2
-  echo "  it appears on PATH after $self_dir." >&2
-  exit 127
-}
+# 1. Locate the real claude executable, avoiding self-recursion.
+if [ -n "${CLAUDE_NIX_EXECUTABLE:-}" ]; then
+  real_claude=$CLAUDE_NIX_EXECUTABLE
+  if [ ! -x "$real_claude" ]; then
+    echo "claude-in-nix-devshell: CLAUDE_NIX_EXECUTABLE=$real_claude is not executable" >&2
+    exit 127
+  fi
+else
+  self_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+  clean_path=$(echo "$PATH" | tr ':' '\n' | grep -vxF "$self_dir" | paste -sd: -)
+  real_claude=$(PATH="$clean_path" command -v claude) || {
+    echo "claude-in-nix-devshell: real claude executable not found on PATH (excluding $self_dir)" >&2
+    echo "  install Claude Code first (npm, Homebrew, official installer, …) and ensure" >&2
+    echo "  it appears on PATH after $self_dir, or set CLAUDE_NIX_EXECUTABLE." >&2
+    exit 127
+  }
+fi
 
 # 2. Escape hatch.
-if [ "${CLAUDE_NIX_BYPASS:-}" = "1" ]; then
+if [ "${CLAUDE_NIX_DISABLE:-}" = "1" ]; then
   exec "$real_claude" "$@"
 fi
 
@@ -52,10 +60,10 @@ if $inject_session; then
 fi
 
 state_dir="${XDG_RUNTIME_DIR:-/tmp}"
-export CLAUDE_NIX_SESSION_ID="${session_id:-unknown}"
-export CLAUDE_NIX_FLAG="$state_dir/claude-in-nix-devshell-restart-$CLAUDE_NIX_SESSION_ID"
-export CLAUDE_NIX_BASELINE="$state_dir/claude-in-nix-devshell-baseline-$CLAUDE_NIX_SESSION_ID"
-trap 'rm -f "$CLAUDE_NIX_FLAG" "$CLAUDE_NIX_BASELINE"' EXIT
+export _CLAUDE_NIX_SESSION_ID="${session_id:-unknown}"
+export _CLAUDE_NIX_FLAG="$state_dir/claude-in-nix-devshell-restart-$_CLAUDE_NIX_SESSION_ID"
+export _CLAUDE_NIX_BASELINE="$state_dir/claude-in-nix-devshell-baseline-$_CLAUDE_NIX_SESSION_ID"
+trap 'rm -f "$_CLAUDE_NIX_FLAG" "$_CLAUDE_NIX_BASELINE"' EXIT
 
 # 5. Restart loop.
 rc=0
@@ -65,9 +73,9 @@ while :; do
   else
     "$real_claude" "$@" || rc=$?
   fi
-  if [ -e "$CLAUDE_NIX_FLAG" ]; then
-    rm -f "$CLAUDE_NIX_FLAG" "$CLAUDE_NIX_BASELINE"
-    set -- --resume "$CLAUDE_NIX_SESSION_ID"
+  if [ -e "$_CLAUDE_NIX_FLAG" ]; then
+    rm -f "$_CLAUDE_NIX_FLAG" "$_CLAUDE_NIX_BASELINE"
+    set -- --resume "$_CLAUDE_NIX_SESSION_ID"
     continue
   fi
   exit "$rc"
