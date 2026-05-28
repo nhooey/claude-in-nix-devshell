@@ -51,6 +51,7 @@
               {
                 nativeBuildInputs = with pkgs; [
                   bash
+                  bats
                   coreutils
                   gawk
                   git
@@ -64,7 +65,7 @@
                 chmod -R u+w src tests
                 patchShebangs src tests
                 export HOME=$TMPDIR
-                bash tests/integration.sh ./src/claude
+                CLAUDE_SHIM=./src/claude bats tests/integration.bats
                 touch $out
               '';
 
@@ -77,13 +78,13 @@
             settings.formatter.shfmt.includes = [
               "src/claude"
               "src/prompt-hook"
-              "tests/integration.sh"
               "tests/stub-claude"
               "tests/stub-nix"
             ];
           };
 
           devshells.default = {
+            packages = [ pkgs.bats ];
             commands = [
               {
                 category = "dev";
@@ -107,7 +108,7 @@
                 category = "dev";
                 name = "tests";
                 help = "Run integration tests against ./src/claude";
-                command = "bash tests/integration.sh ./src/claude";
+                command = "CLAUDE_SHIM=./src/claude bats tests/integration.bats";
               }
             ];
           };
