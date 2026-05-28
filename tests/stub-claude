@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # Test stub: records what the shim handed off to it.
+#
+# Special-cases `claude --version`: the shim now probes every PATH
+# candidate with --version to find a working real Claude. We answer
+# that probe quickly with a fake version string and skip logging so
+# the probe doesn't pollute the argv log under test.
+if [ "$#" = 1 ] && [ "$1" = "--version" ]; then
+  echo "1.0.0-stub (Claude Code stub)"
+  exit 0
+fi
 log=${STUB_CLAUDE_LOG:-/dev/null}
 {
   echo "argv: $*"

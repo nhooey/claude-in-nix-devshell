@@ -71,13 +71,52 @@ The hook is what detects `flake.nix` / `flake.lock` drift and prints the
 red-background warning. Without it the shim still routes through the
 devShell on launch, but won't notice mid-session drift.
 
+## Locating the real `claude`
+
+On every invocation the shim resolves which `claude` to wrap by
+probing candidates with `--version`:
+
+1. If `CLAUDE_NIX_EXECUTABLE` is set (either by the user or by the
+   `realClaude` build-time pin below), it tries that path first.
+2. Otherwise — or if the pinned path fails its probe — it walks every
+   `claude` on `$PATH` (excluding the shim itself), runs
+   `<candidate> --version`, and accepts the first one that exits 0
+   with non-empty stdout within 10 s.
+
+The selected binary is logged to stderr once per invocation:
+
+```
+claude-in-nix-devshell: wrapping /opt/homebrew/bin/claude (1.0.42) [src: pinned]
+```
+
+Set `CLAUDE_NIX_QUIET=1` to suppress that line. A stale pin produces a
+visible warning before falling back to the PATH scan, so silent
+behavioural drift is unlikely.
+
+### Build-time pin
+
+Useful when the shim is invoked from a GUI context (JetBrains, Dock,
+launchd) where `$PATH` doesn't include the dir containing the real
+`claude`. Override `realClaude` when consuming the flake:
+
+```nix
+(claude-in-nix-devshell.packages.${system}.default.override {
+  realClaude = "/opt/homebrew/bin/claude";  # or a derivation
+})
+```
+
+The pin is wired via `wrapProgram --set-default CLAUDE_NIX_EXECUTABLE`,
+so runtime `CLAUDE_NIX_EXECUTABLE=…` still wins.
+
 ## Escape hatches
 
 - `CLAUDE_NIX_DISABLE=1 claude …` — skip the devShell logic entirely
   and exec the real `claude` with the original args.
-- `CLAUDE_NIX_EXECUTABLE=/path/to/claude claude …` — invoke this
-  executable instead of searching `$PATH`. Useful for testing the shim
-  against a stub.
+- `CLAUDE_NIX_EXECUTABLE=/path/to/claude claude …` — try this
+  executable first. Useful for testing the shim against a stub, or
+  pointing at a specific install in a multi-claude environment.
+- `CLAUDE_NIX_QUIET=1 claude …` — suppress the wrapper's startup log
+  line.
 - Run from a directory that isn't inside any git work tree — the shim
   passes through.
 - Remove the project's `flake.nix`, or make `nix develop --command true`

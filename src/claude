@@ -5,32 +5,106 @@
 
 set -eu
 
-# 1. Locate the real claude executable, avoiding self-recursion.
-if [ -n "${CLAUDE_NIX_EXECUTABLE:-}" ]; then
-  real_claude=$CLAUDE_NIX_EXECUTABLE
-  if [ ! -x "$real_claude" ]; then
-    echo "claude-in-nix-devshell: CLAUDE_NIX_EXECUTABLE=$real_claude is not executable" >&2
-    exit 127
+prog=claude-in-nix-devshell
+self_realpath=$(readlink -f "$0")
+self_dir=$(dirname "$self_realpath")
+
+log() { [ "${CLAUDE_NIX_QUIET:-}" = "1" ] || echo "$prog: $*" >&2; }
+warn() { echo "$prog: warning: $*" >&2; }
+die() {
+  echo "$prog: error: $1" >&2
+  exit "${2:-1}"
+}
+
+# Validate a candidate path: must be executable, must not be the shim
+# itself (avoid infinite recursion when several wrappers stack), and
+# must exit 0 with non-empty stdout from `--version`. Echoes the
+# version string on success; returns non-zero on any failure.
+test_claude() {
+  local candidate=$1 candidate_real version
+  [ -x "$candidate" ] || return 1
+  candidate_real=$(readlink -f "$candidate" 2>/dev/null) || candidate_real=$candidate
+  [ "$candidate_real" = "$self_realpath" ] && return 1
+  # Bound the probe — a stray `claude` binary that hangs shouldn't hang
+  # the shim. `timeout` ships with coreutils, which the Nix wrapper
+  # always prepends to PATH.
+  if version=$(timeout 10 "$candidate" --version 2>/dev/null) && [ -n "$version" ]; then
+    printf '%s' "$version"
+    return 0
   fi
-else
-  self_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
-  clean_path=$(echo "$PATH" | tr ':' '\n' | grep -vxF "$self_dir" | paste -sd: -)
-  real_claude=$(PATH="$clean_path" command -v claude) || {
-    echo "claude-in-nix-devshell: real claude executable not found on PATH (excluding $self_dir)" >&2
-    echo "  install Claude Code first (npm, Homebrew, official installer, …) and ensure" >&2
-    echo "  it appears on PATH after $self_dir, or set CLAUDE_NIX_EXECUTABLE." >&2
-    exit 127
-  }
+  return 1
+}
+
+# 1. Locate a working real-claude binary.
+#
+# Strategy:
+#   a. If CLAUDE_NIX_EXECUTABLE is set (by the user, or by the Nix
+#      `realClaude` build-time pin via wrapProgram --set-default), try it
+#      first. On `--version` failure, fall through to a PATH scan rather
+#      than aborting — a stale pin (binary moved, GC'd, replaced) should
+#      not break invocation if a working claude exists elsewhere.
+#   b. Otherwise (or as fallback), walk every PATH entry containing a
+#      `claude` executable, skip the shim itself, and accept the first
+#      one whose `--version` looks healthy. This lets users keep multiple
+#      claude binaries on PATH (e.g. npm-installed + Homebrew) and the
+#      wrapper picks whichever responds.
+real_claude=
+real_version=
+source=
+
+if [ -n "${CLAUDE_NIX_EXECUTABLE:-}" ]; then
+  if real_version=$(test_claude "$CLAUDE_NIX_EXECUTABLE"); then
+    real_claude=$CLAUDE_NIX_EXECUTABLE
+    source=pinned
+  else
+    warn "CLAUDE_NIX_EXECUTABLE=$CLAUDE_NIX_EXECUTABLE failed --version probe; scanning PATH for a working fallback"
+  fi
 fi
+
+if [ -z "$real_claude" ]; then
+  IFS=: read -ra path_entries <<<"$PATH"
+  for dir in "${path_entries[@]}"; do
+    [ -n "$dir" ] || continue
+    candidate=$dir/claude
+    [ -e "$candidate" ] || continue
+    if real_version=$(test_claude "$candidate"); then
+      real_claude=$candidate
+      source=PATH
+      break
+    fi
+  done
+fi
+
+if [ -z "$real_claude" ]; then
+  die "could not find a working Claude binary.
+  shim path:  $self_realpath (this script — you are running the claude-in-nix-devshell wrapper)
+  PATH:       $PATH
+  pinned:     ${CLAUDE_NIX_EXECUTABLE:-<unset>}
+  tried:      every 'claude' on PATH (excluding self); each was probed with '<candidate> --version'.
+              a healthy claude exits 0 with non-empty stdout within 10s.
+
+  fix one of:
+    1. install Claude Code so 'claude' appears on PATH (npm install -g @anthropic-ai/claude-code,
+       Homebrew, official installer, or a Nix derivation).
+    2. set CLAUDE_NIX_EXECUTABLE=/absolute/path/to/claude in the calling environment.
+    3. rebuild the wrapper with realClaude pinned:
+         pkgs.callPackage \"\${claude-in-nix-devshell-src}/package.nix\" {
+           realClaude = \"/opt/homebrew/bin/claude\";
+         }" 127
+fi
+
+log "wrapping $real_claude ($real_version) [src: $source]"
 
 # 2. Escape hatch.
 if [ "${CLAUDE_NIX_DISABLE:-}" = "1" ]; then
+  log "CLAUDE_NIX_DISABLE=1 set; skipping devShell logic and exec'ing real claude directly"
   exec "$real_claude" "$@"
 fi
 
 # 3. Anchor to the git toplevel; outside any repo, pass through.
 root=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -z "$root" ]; then
+  log "not inside a git work tree; passing through to real claude without devShell"
   exec "$real_claude" "$@"
 fi
 cd "$root"

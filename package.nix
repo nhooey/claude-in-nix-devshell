@@ -9,7 +9,26 @@
   gnugrep,
   nix,
   util-linux,
+  # Optional build-time pin of the real `claude` binary. Either an
+  # absolute path string or a derivation exposing `mainProgram = "claude"`
+  # (or a `bin/claude`). When set, the wrapper exports
+  # CLAUDE_NIX_EXECUTABLE to this path via `--set-default`, so the shim
+  # finds the real binary without depending on the caller's PATH — useful
+  # for GUI-launched IDEs (e.g. JetBrains) where PATH is minimal.
+  # Runtime `CLAUDE_NIX_EXECUTABLE=…` still wins. Null falls back to the
+  # original PATH-lookup behavior.
+  realClaude ? null,
 }:
+
+let
+  realClaudePath =
+    if realClaude == null then
+      null
+    else if lib.isDerivation realClaude then
+      lib.getExe realClaude
+    else
+      toString realClaude;
+in
 
 stdenvNoCC.mkDerivation {
   pname = "claude-in-nix-devshell";
@@ -55,7 +74,11 @@ stdenvNoCC.mkDerivation {
     in
     ''
       wrapProgram $out/bin/claude \
-        --prefix PATH : ${shimPath}
+        --prefix PATH : ${shimPath} ${
+          lib.optionalString (
+            realClaudePath != null
+          ) ''--set-default CLAUDE_NIX_EXECUTABLE "${realClaudePath}"''
+        }
 
       wrapProgram $out/libexec/claude-in-nix-devshell/prompt-hook \
         --prefix PATH : ${hookPath}
