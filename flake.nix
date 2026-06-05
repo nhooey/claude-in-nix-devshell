@@ -42,8 +42,8 @@
     }:
     let
       # Root-side wiring for the `skills-devshell/` sub-flake: the dev-shell
-      # skill set (all skills-git skills plus nix-flakes/nix-garnix-ci from
-      # skills-nix) is defined in the isolated `skills-devshell/` sub-flake and
+      # skill set (all git-skills skills plus nix-flakes/nix-garnix-ci from
+      # nix-skills) is defined in the isolated `skills-devshell/` sub-flake and
       # invoked here at RUNTIME (not a root input), so this flake keeps zero
       # skill inputs and never drags the skill mesh into its lock.
       devshellSkills = agent-skill-flake.lib.devshellSkillsHook { };
@@ -107,8 +107,8 @@
             packages = [ pkgs.bats ];
 
             # Auto-reconcile the dev-shell skill set at project scope on
-            # `nix develop`: every skills-git skill plus nix-flakes/
-            # nix-garnix-ci from skills-nix, merged into one combination that a
+            # `nix develop`: every git-skills skill plus nix-flakes/
+            # nix-garnix-ci from nix-skills, merged into one combination that a
             # single reconcile owner converges — declarative + idempotent. The
             # skills-devshell sub-flake's reconcile app is invoked at RUNTIME by
             # this hook (`nix run "$PRJ_ROOT/skills-devshell#reconcile"`), so the
