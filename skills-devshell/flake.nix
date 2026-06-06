@@ -51,8 +51,6 @@
       inherit nixpkgs;
       systems = import inputs.systems;
       name = "claude-in-nix-devshell-skills";
-      envName = "agent-skills-claude-in-nix-devshell-skills";
-      packagePrefix = "agent-skill-";
       sources = [
         { source = git-skills; }
         {

@@ -11,22 +11,18 @@
 
     systems.url = "github:nix-systems/default";
 
-    devshell = {
-      url = "github:numtide/devshell";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # `agent-skill-flake` is the builder library, not a skill — it provides the
-    # `devshellSkillsHook` that wires the dev-shell skill set in below. The skill
-    # sources themselves are NOT inputs here: they live only in the
-    # `skills-devshell/` sub-flake's lock, which this dev shell invokes at
-    # RUNTIME (never as a root input), keeping this flake a leaf with zero skill
-    # inputs.
+    # `flakeModules.devshellSkills` flake-parts module that wires the dev-shell
+    # skill set in below. That module bundles numtide/devshell, so this flake
+    # needs no `devshell` input of its own. The skill sources themselves are NOT
+    # inputs here: they live only in the `skills-devshell/` sub-flake's lock,
+    # which this dev shell invokes at RUNTIME (never as a root input), keeping
+    # this flake a leaf with zero skill inputs.
     agent-skill-flake = {
       url = "github:nhooey/agent-skill-flake";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -37,24 +33,27 @@
     inputs@{
       flake-parts,
       systems,
-      agent-skill-flake,
       ...
     }:
-    let
-      # Root-side wiring for the `skills-devshell/` sub-flake: the dev-shell
-      # skill set (all git-skills skills plus nix-flakes/nix-garnix-ci from
-      # nix-skills) is defined in the isolated `skills-devshell/` sub-flake and
-      # invoked here at RUNTIME (not a root input), so this flake keeps zero
-      # skill inputs and never drags the skill mesh into its lock.
-      devshellSkills = agent-skill-flake.lib.devshellSkillsHook { };
-    in
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = import systems;
 
       imports = [
-        inputs.devshell.flakeModule
+        # Bundles numtide/devshell + the whole dev-shell skills convention
+        # (motd, install-skills startup, the ci/dev/maintenance command trio,
+        # and the reap-skills/update-skills-devshell pair). Configured via the
+        # `agent-skill-flake.devshellSkills` options block below.
+        inputs.agent-skill-flake.flakeModules.devshellSkills
         inputs.treefmt-nix.flakeModule
       ];
+
+      # The dev-shell skill set (all git-skills skills plus nix-flakes/
+      # nix-garnix-ci from nix-skills) lives in the isolated `skills-devshell/`
+      # sub-flake and is invoked at RUNTIME (not a root input), so this flake
+      # keeps zero skill inputs and never drags the skill mesh into its lock.
+      agent-skill-flake.devshellSkills = {
+        name = "claude-in-nix-devshell";
+      };
 
       perSystem =
         { pkgs, ... }:
@@ -103,17 +102,16 @@
             ];
           };
 
+          # The devshellSkills module (imported above) supplies this devShell's
+          # name, motd, the install-skills startup, the ci/dev/maintenance
+          # command trio (check / fmt / update-flake), and the skills commands
+          # (reap-skills / update-skills-devshell). Only repo-specific packages
+          # and commands are set here; both are list options, so they merge onto
+          # the module's rather than replacing them. The module's ci/check and
+          # dev/fmt already run `nix flake check` / `nix fmt`, so the local
+          # duplicates were dropped.
           devshells.default = {
             packages = [ pkgs.bats ];
-
-            # Auto-reconcile the dev-shell skill set at project scope on
-            # `nix develop`: every git-skills skill plus nix-flakes/
-            # nix-garnix-ci from nix-skills, merged into one combination that a
-            # single reconcile owner converges — declarative + idempotent. The
-            # skills-devshell sub-flake's reconcile app is invoked at RUNTIME by
-            # this hook (`nix run "$PRJ_ROOT/skills-devshell#reconcile"`), so the
-            # skill sources never become root inputs.
-            devshell.startup.install-skills.text = devshellSkills.startup;
 
             commands = [
               {
@@ -124,24 +122,11 @@
               }
               {
                 category = "dev";
-                name = "check";
-                help = "Run flake checks (treefmt + build + integration)";
-                command = "nix flake check";
-              }
-              {
-                category = "dev";
-                name = "fmt";
-                help = "Format source with treefmt";
-                command = "nix fmt";
-              }
-              {
-                category = "dev";
                 name = "tests";
                 help = "Run integration tests against ./src/claude";
                 command = "CLAUDE_SHIM=./src/claude bats tests/integration.bats";
               }
-            ]
-            ++ devshellSkills.commands;
+            ];
           };
         };
     };
