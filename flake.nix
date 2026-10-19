@@ -47,8 +47,8 @@
         inputs.treefmt-nix.flakeModule
       ];
 
-      # The dev-shell skill set (all git-skills skills plus nix-flakes/
-      # nix-garnix-ci from nix-skills) lives in the isolated `skills-devshell/`
+      # The dev-shell skill set (all git-skills skills plus the nix-flakes
+      # skill from nix-skills) lives in the isolated `skills-devshell/`
       # sub-flake and is invoked at RUNTIME (not a root input), so this flake
       # keeps zero skill inputs and never drags the skill mesh into its lock.
       agent-skill-flake.devshellSkills = {
