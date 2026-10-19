@@ -1,5 +1,5 @@
 {
-  description = "claude-in-nix-devshell dev-shell skill set — an isolated sub-flake invoked at RUNTIME by the root devShell, never a root input. The skill sources (all git-skills skills plus nix-flakes/nix-garnix-ci from nix-skills) live only in THIS flake's lock, so the root claude-in-nix-devshell stays a leaf with zero skill inputs and transitive consumers never drag the skill mesh in.";
+  description = "claude-in-nix-devshell dev-shell skill set — an isolated sub-flake invoked at RUNTIME by the root devShell, never a root input. The skill sources (all git-skills skills plus the nix-flakes skill from nix-skills) live only in THIS flake's lock, so the root claude-in-nix-devshell stays a leaf with zero skill inputs and transitive consumers never drag the skill mesh in.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -24,7 +24,7 @@
       };
     };
 
-    # nix-skills: only the nix-flakes and nix-garnix-ci skills are cherry-picked
+    # nix-skills: only the nix-flakes skill is cherry-picked
     # below; the source is pulled whole and the subset is selected in the
     # combination's `sources` entry. Its builder input is followed onto our
     # `agent-skill-flake` node so the builder collapses to one evaluation;
@@ -57,7 +57,6 @@
           source = nix-skills;
           skills = [
             "nix-flakes"
-            "nix-garnix-ci"
           ];
         }
       ];
